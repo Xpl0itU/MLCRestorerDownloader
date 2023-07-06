@@ -11,7 +11,7 @@ import (
 	"strings"
 )
 
-func downloadFile(url, outputPath string) error {
+func downloadFile(url string, outputPath string) error {
 	response, err := http.Get(url)
 	if err != nil {
 		return err
@@ -32,7 +32,7 @@ func downloadFile(url, outputPath string) error {
 	return err
 }
 
-func DownloadTitle(titleID, outputDirectory string) error {
+func DownloadTitle(titleID string, outputDirectory string) error {
 	outputDir := strings.TrimRight(outputDirectory, "/\\")
 	baseURL := fmt.Sprintf("http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/%s", titleID)
 
