@@ -89,53 +89,26 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 		return err
 	}
 
-	downloadURL = fmt.Sprintf("%s/%s", baseURL, "cetk")
-	resp, err = http.Get(downloadURL)
+	fmt.Println("Generating our own title.cert...")
+	cetk := bytes.Buffer{}
+	defaultCert, err := getDefaultCert()
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	cetk.Write(getCert(&tmdData, 0, contentCount))
+	cetk.Write(getCert(&tmdData, 1, contentCount))
+	cetk.Write(defaultCert)
 
-	if resp.StatusCode != http.StatusOK {
-		fmt.Println("Cert not found in NUS, generating our own...")
-		cetk := bytes.Buffer{}
-		defaultCert, err := getDefaultCert()
-		if err != nil {
-			return err
-		}
-		cetk.Write(getCert(&tmdData, 0, contentCount))
-		cetk.Write(getCert(&tmdData, 1, contentCount))
-		cetk.Write(defaultCert)
-
-		certPath := filepath.Join(outputDir, "title.cert")
-		certFile, err := os.Create(certPath)
-		if err != nil {
-			return err
-		}
-		err = binary.Write(certFile, binary.BigEndian, cetk.Bytes())
-		if err != nil {
-			return err
-		}
-		certFile.Close()
-	} else {
-		certData := bytes.Buffer{}
-		_, err = io.Copy(&certData, resp.Body)
-		if err != nil {
-			return err
-		}
-
-		certPath := filepath.Join(outputDir, "title.cert")
-		certFile, err := os.Create(certPath)
-		if err != nil {
-			return err
-		}
-		defer certFile.Close()
-
-		_, err = certFile.Write(certData.Bytes())
-		if err != nil {
-			return err
-		}
+	certPath := filepath.Join(outputDir, "title.cert")
+	certFile, err := os.Create(certPath)
+	if err != nil {
+		return err
 	}
+	err = binary.Write(certFile, binary.BigEndian, cetk.Bytes())
+	if err != nil {
+		return err
+	}
+	certFile.Close()
 
 	for i := 0; i < int(contentCount); i++ {
 		offset := 2820 + (48 * i)
