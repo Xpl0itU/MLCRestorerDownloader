@@ -108,7 +108,7 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 	if err != nil {
 		return err
 	}
-	certFile.Close()
+	defer certFile.Close()
 
 	for i := 0; i < int(contentCount); i++ {
 		offset := 2820 + (48 * i)
