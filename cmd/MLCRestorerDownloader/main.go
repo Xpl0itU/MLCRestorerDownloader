@@ -9,17 +9,10 @@ import (
 )
 
 func main() {
-	titles, err := readTitleInfoFromFile("titles.json")
-	if err != nil {
-		fmt.Println("Error:", err)
-		return
-	}
-
 	fmt.Println("Menu:")
-	fmt.Println("1. Download EUR titles")
-	fmt.Println("2. Download USA titles")
-	fmt.Println("3. Download JPN titles")
-	fmt.Println("4. Exit")
+	fmt.Println("1. Download MLC titles")
+	fmt.Println("2. Download SLC titles")
+	fmt.Println("3. Exit")
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Print("Select an option: ")
@@ -31,12 +24,10 @@ func main() {
 
 	switch option {
 	case "1\n":
-		downloadTitles("EUR", titles)
+		showSubmenu("MLC")
 	case "2\n":
-		downloadTitles("USA", titles)
+		showSubmenu("SLC")
 	case "3\n":
-		downloadTitles("JPN", titles)
-	case "4\n":
 		fmt.Println("Exiting...")
 		return
 	default:
@@ -45,15 +36,70 @@ func main() {
 	}
 }
 
-func downloadTitles(region string, titles TitleMap) {
+func showSubmenu(titleType string) {
+	if titleType != "MLC" && titleType != "SLC" {
+		fmt.Println("Invalid title type")
+		return
+	}
+	titles, err := readTitleInfoFromFile("titles.json")
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	var chosenTitles map[string][]string
+	switch titleType {
+	case "MLC":
+		chosenTitles = titles.MLC
+	case "SLC":
+		chosenTitles = titles.SLC
+	default:
+		fmt.Println("Invalid option")
+		return
+	}
+
+	fmt.Println("Menu:")
+	fmt.Printf("1. Download EUR %s titles\n", titleType)
+	fmt.Printf("2. Download USA %s titles\n", titleType)
+	fmt.Printf("3. Download JPN %s titles\n", titleType)
+	fmt.Println("4. Back to main menu")
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("Select an option: ")
+	option, err := reader.ReadString('\n')
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
+	switch option {
+	case "1\n":
+		downloadTitles("EUR", chosenTitles, titleType)
+	case "2\n":
+		downloadTitles("USA", chosenTitles, titleType)
+	case "3\n":
+		downloadTitles("JPN", chosenTitles, titleType)
+	case "4\n":
+		fmt.Println("Going back to the main menu...")
+		main()
+	default:
+		fmt.Println("Invalid option")
+		return
+	}
+}
+
+func downloadTitles(region string, titles map[string][]string, titleType string) {
 	selectedRegionTitles := titles[region]
 	allRegionTitles := titles["All"]
 
 	allTitles := append(selectedRegionTitles, allRegionTitles...)
 
 	for _, titleID := range allTitles {
-		fmt.Printf("Downloading files for title %s on region %s\n", titleID, region)
-		downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s", region, titleID))
-		fmt.Printf("Download files for title %s on region %s done\n", titleID, region)
+		if titleID == "dummy" {
+			continue
+		}
+		fmt.Printf("Downloading files for title %s on region %s for type %s\n", titleID, region, titleType)
+		downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID))
+		fmt.Printf("Download files for title %s on region %s for type %s done\n", titleID, region, titleType)
 	}
 }
