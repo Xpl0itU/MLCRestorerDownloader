@@ -7,19 +7,24 @@ import (
 	"net/http"
 )
 
-func getCert(tmdData *bytes.Buffer, id int, numContents uint16) []byte {
-	var certSlice []byte
-	if tmdData.Len() == int((0x0B04+0x30*numContents+0xA00)-0x300) {
-		certSlice = tmdData.Bytes()[0x0B04+0x30*numContents : 0x0B04+0x30*numContents+0xA00-0x300]
-	} else {
-		certSlice = tmdData.Bytes()[0x0B04+0x30*numContents : 0x0B04+0x30*numContents+0xA00]
+func getCert(tmdData *bytes.Buffer, id int, numContents uint16) ([]byte, error) {
+	certStart := 0x0B04 + 0x30*numContents
+	certEnd := certStart + 0xA00
+
+	if tmdData.Len() != int(certEnd-0x300) {
+		certEnd -= 0x300
 	}
-	if id == 0 {
-		return certSlice[:0x400]
-	} else if id == 1 {
-		return certSlice[0x400 : 0x400+0x300]
+
+	certSlice := tmdData.Bytes()[certStart:certEnd]
+
+	switch id {
+	case 0:
+		return certSlice[:0x400], nil
+	case 1:
+		return certSlice[0x400:0x700], nil
+	default:
+		return nil, fmt.Errorf("invalid id: %d", id)
 	}
-	return certSlice
 }
 
 func getDefaultCert() ([]byte, error) {

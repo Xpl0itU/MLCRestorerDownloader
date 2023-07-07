@@ -89,14 +89,24 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 		return err
 	}
 
-	fmt.Println("Generating our own title.cert...")
 	cetk := bytes.Buffer{}
+
+	cert0, err := getCert(&tmdData, 0, contentCount)
+	if err != nil {
+		return err
+	}
+	cetk.Write(cert0)
+
+	cert1, err := getCert(&tmdData, 1, contentCount)
+	if err != nil {
+		return err
+	}
+	cetk.Write(cert1)
+
 	defaultCert, err := getDefaultCert()
 	if err != nil {
 		return err
 	}
-	cetk.Write(getCert(&tmdData, 0, contentCount))
-	cetk.Write(getCert(&tmdData, 1, contentCount))
 	cetk.Write(defaultCert)
 
 	certPath := filepath.Join(outputDir, "title.cert")
