@@ -24,11 +24,11 @@ func main() {
 	}
 
 	switch option {
-	case "1\n":
+	case "1\n", "1\r\n":
 		showSubmenu("MLC")
-	case "2\n":
+	case "2\n", "2\r\n":
 		showSubmenu("SLC")
-	case "3\n":
+	case "3\n", "3\r\n":
 		fmt.Println("Exiting...")
 		return
 	default:
@@ -74,13 +74,13 @@ func showSubmenu(titleType string) {
 	}
 
 	switch option {
-	case "1\n":
+	case "1\n", "1\r\n":
 		downloadTitles("EUR", chosenTitles, titleType)
-	case "2\n":
+	case "2\n", "2\r\n":
 		downloadTitles("USA", chosenTitles, titleType)
-	case "3\n":
+	case "3\n", "3\r\n":
 		downloadTitles("JPN", chosenTitles, titleType)
-	case "4\n":
+	case "4\n", "4\r\n":
 		fmt.Println("Going back to the main menu...")
 		main()
 	default:
