@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"fmt"
 	"os"
-	"sync"
 
 	downloader "github.com/Xpl0itU/MLCRestorerDownloader"
 )
@@ -95,23 +94,17 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 
 	allTitles := append(selectedRegionTitles, allRegionTitles...)
 
-	var wg sync.WaitGroup
 	for _, titleID := range allTitles {
 		if titleID == "dummy" {
 			continue
 		}
-		wg.Add(1)
-		go func(tID, rgn, tType string) {
-			defer wg.Done()
-			fmt.Printf("Downloading files for title %s on region %s for type %s\n", tID, rgn, tType)
-			err := downloader.DownloadTitle(tID, fmt.Sprintf("output/%s/%s/%s", tType, rgn, tID))
-			if err != nil {
-				fmt.Println("Error:", err)
-				os.Exit(1)
-			}
-			fmt.Printf("Download files for title %s on region %s for type %s done\n", tID, rgn, tType)
-		}(titleID, region, titleType)
+		fmt.Printf("Downloading files for title %s on region %s for type %s\n", titleID, region, titleType)
+		err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID))
+		if err != nil {
+			fmt.Println("Error:", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Download files for title %s on region %s for type %s done\n", titleID, region, titleType)
 	}
-	wg.Wait()
 	fmt.Println("All done!")
 }
