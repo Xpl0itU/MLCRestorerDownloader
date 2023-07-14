@@ -132,14 +132,7 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 			var content contentInfo
 			content.Hash = tmdData[offset+16 : offset+0x14]
 			content.ID = fmt.Sprintf("%08X", id)
-			content.Size = int64(tmdData[offset+8])<<56 |
-				int64(tmdData[offset+9])<<48 |
-				int64(tmdData[offset+10])<<40 |
-				int64(tmdData[offset+11])<<32 |
-				int64(tmdData[offset+12])<<24 |
-				int64(tmdData[offset+13])<<16 |
-				int64(tmdData[offset+14])<<8 |
-				int64(tmdData[offset+15])
+			binary.Read(bytes.NewReader(tmdData[offset+8:offset+15]), binary.BigEndian, &content.Size)
 			err = checkContentHashes(outputDirectory, commonKey, encryptedTitleKey, titleKeyBytes, content)
 			if err != nil {
 				return err
