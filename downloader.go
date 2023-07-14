@@ -90,7 +90,7 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 	}
 	cert.Write(cert1)
 
-	defaultCert, err := getDefaultCert()
+	defaultCert, err := getDefaultCert(client)
 	if err != nil {
 		return err
 	}
