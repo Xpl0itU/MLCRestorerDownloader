@@ -3,6 +3,7 @@ package mlcrestorerdownloader
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -25,11 +26,15 @@ func downloadFile(client *grab.Client, url string, outputPath string) error {
 	return nil
 }
 
-func DownloadTitle(titleID string, outputDirectory string) error {
+func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) error {
 	outputDir := strings.TrimRight(outputDirectory, "/\\")
 	baseURL := fmt.Sprintf("http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/%s", titleID)
+	titleKeyBytes, err := hex.DecodeString(titleID)
+	if err != nil {
+		return err
+	}
 
-	err := os.MkdirAll(outputDir, os.ModePerm)
+	err = os.MkdirAll(outputDir, os.ModePerm)
 	if err != nil {
 		return err
 	}
@@ -59,6 +64,11 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 	if err != nil {
 		return err
 	}
+	tikData, err := os.ReadFile(tikPath)
+	if err != nil {
+		return err
+	}
+	encryptedTitleKey := tikData[0x1BF : 0x1BF+0x10]
 
 	var contentCount uint16
 	err = binary.Read(bytes.NewReader(tmdData[478:480]), binary.BigEndian, &contentCount)
@@ -66,32 +76,32 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 		return err
 	}
 
-	cetk := bytes.Buffer{}
+	cert := bytes.Buffer{}
 
 	cert0, err := getCert(tmdData, 0, contentCount)
 	if err != nil {
 		return err
 	}
-	cetk.Write(cert0)
+	cert.Write(cert0)
 
 	cert1, err := getCert(tmdData, 1, contentCount)
 	if err != nil {
 		return err
 	}
-	cetk.Write(cert1)
+	cert.Write(cert1)
 
 	defaultCert, err := getDefaultCert()
 	if err != nil {
 		return err
 	}
-	cetk.Write(defaultCert)
+	cert.Write(defaultCert)
 
 	certPath := filepath.Join(outputDir, "title.cert")
 	certFile, err := os.Create(certPath)
 	if err != nil {
 		return err
 	}
-	err = binary.Write(certFile, binary.BigEndian, cetk.Bytes())
+	err = binary.Write(certFile, binary.BigEndian, cert.Bytes())
 	if err != nil {
 		return err
 	}
@@ -116,6 +126,21 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 			h3Path := filepath.Join(outputDir, fmt.Sprintf("%08X.h3", id))
 			downloadURL = fmt.Sprintf("%s/%08X.h3", baseURL, id)
 			err = downloadFile(client, downloadURL, h3Path)
+			if err != nil {
+				return err
+			}
+			var content contentInfo
+			content.Hash = tmdData[offset+16 : offset+0x14]
+			content.ID = fmt.Sprintf("%08X", id)
+			content.Size = int64(tmdData[offset+8])<<56 |
+				int64(tmdData[offset+9])<<48 |
+				int64(tmdData[offset+10])<<40 |
+				int64(tmdData[offset+11])<<32 |
+				int64(tmdData[offset+12])<<24 |
+				int64(tmdData[offset+13])<<16 |
+				int64(tmdData[offset+14])<<8 |
+				int64(tmdData[offset+15])
+			err = checkContentHashes(outputDirectory, commonKey, encryptedTitleKey, titleKeyBytes, content)
 			if err != nil {
 				return err
 			}

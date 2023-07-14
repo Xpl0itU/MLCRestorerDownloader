@@ -94,12 +94,18 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 
 	allTitles := append(selectedRegionTitles, allRegionTitles...)
 
+	commonKey, err := getCommonKey()
+	if err != nil {
+		fmt.Println("Error:", err)
+		return
+	}
+
 	for _, titleID := range allTitles {
 		if titleID == "dummy" {
 			continue
 		}
 		fmt.Printf("Downloading files for title %s on region %s for type %s\n", titleID, region, titleType)
-		err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID))
+		err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID), commonKey)
 		if err != nil {
 			fmt.Println("Error:", err)
 			os.Exit(1)
