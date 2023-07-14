@@ -4,32 +4,25 @@ import (
 	"bytes"
 	"encoding/binary"
 	"fmt"
-	"io"
-	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/cavaliergopher/grab/v3"
 )
 
-func downloadFile(url string, outputPath string) error {
-	response, err := http.Get(url)
+func downloadFile(client *grab.Client, url string, outputPath string) error {
+	req, err := grab.NewRequest(outputPath, url)
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
-
-	if response.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download file from %s, status code: %d", url, response.StatusCode)
-	}
-
-	out, err := os.Create(outputPath)
-	if err != nil {
+	resp := client.Do(req)
+	if err := resp.Err(); err != nil {
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, response.Body)
-	return err
+	fmt.Printf("[Info] Download saved to ./%v \n", resp.Filename)
+	return nil
 }
 
 func DownloadTitle(titleID string, outputDirectory string) error {
@@ -41,63 +34,47 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 		return err
 	}
 
+	client := grab.NewClient()
 	downloadURL := fmt.Sprintf("%s/%s", baseURL, "tmd")
-	resp, err := http.Get(downloadURL)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("failed to download tmd from %s, status code: %d", downloadURL, resp.StatusCode)
-	}
-
-	tmdData := bytes.Buffer{}
-	_, err = io.Copy(&tmdData, resp.Body)
-	if err != nil {
-		return err
-	}
-
 	tmdPath := filepath.Join(outputDir, "title.tmd")
-	tmdFile, err := os.Create(tmdPath)
+	err = downloadFile(client, downloadURL, tmdPath)
 	if err != nil {
 		return err
 	}
-	defer tmdFile.Close()
 
-	_, err = tmdFile.Write(tmdData.Bytes())
+	tmdData, err := os.ReadFile(tmdPath)
 	if err != nil {
 		return err
 	}
 
 	var titleVersion uint16
-	err = binary.Read(bytes.NewReader(tmdData.Bytes()[476:478]), binary.BigEndian, &titleVersion)
+	err = binary.Read(bytes.NewReader(tmdData[476:478]), binary.BigEndian, &titleVersion)
 	if err != nil {
 		return err
 	}
 
 	tikPath := filepath.Join(outputDir, "title.tik")
 	downloadURL = fmt.Sprintf("%s/%s", baseURL, "cetk")
-	err = downloadFile(downloadURL, tikPath)
+	err = downloadFile(client, downloadURL, tikPath)
 	if err != nil {
 		return err
 	}
 
 	var contentCount uint16
-	err = binary.Read(bytes.NewReader(tmdData.Bytes()[478:480]), binary.BigEndian, &contentCount)
+	err = binary.Read(bytes.NewReader(tmdData[478:480]), binary.BigEndian, &contentCount)
 	if err != nil {
 		return err
 	}
 
 	cetk := bytes.Buffer{}
 
-	cert0, err := getCert(&tmdData, 0, contentCount)
+	cert0, err := getCert(tmdData, 0, contentCount)
 	if err != nil {
 		return err
 	}
 	cetk.Write(cert0)
 
-	cert1, err := getCert(&tmdData, 1, contentCount)
+	cert1, err := getCert(tmdData, 1, contentCount)
 	if err != nil {
 		return err
 	}
@@ -123,22 +100,22 @@ func DownloadTitle(titleID string, outputDirectory string) error {
 	for i := 0; i < int(contentCount); i++ {
 		offset := 2820 + (48 * i)
 		var id uint32
-		err = binary.Read(bytes.NewReader(tmdData.Bytes()[offset:offset+4]), binary.BigEndian, &id)
+		err = binary.Read(bytes.NewReader(tmdData[offset:offset+4]), binary.BigEndian, &id)
 		if err != nil {
 			return err
 		}
 
 		appPath := filepath.Join(outputDir, fmt.Sprintf("%08X.app", id))
 		downloadURL = fmt.Sprintf("%s/%08X", baseURL, id)
-		err = downloadFile(downloadURL, appPath)
+		err = downloadFile(client, downloadURL, appPath)
 		if err != nil {
 			return err
 		}
 
-		if tmdData.Bytes()[offset+7]&0x2 == 2 {
+		if tmdData[offset+7]&0x2 == 2 {
 			h3Path := filepath.Join(outputDir, fmt.Sprintf("%08X.h3", id))
 			downloadURL = fmt.Sprintf("%s/%08X.h3", baseURL, id)
-			err = downloadFile(downloadURL, h3Path)
+			err = downloadFile(client, downloadURL, h3Path)
 			if err != nil {
 				return err
 			}

@@ -7,12 +7,12 @@ import (
 	"net/http"
 )
 
-func getCert(tmdData *bytes.Buffer, id int, numContents uint16) ([]byte, error) {
+func getCert(tmdData []byte, id int, numContents uint16) ([]byte, error) {
 	var certSlice []byte
-	if tmdData.Len() == int((0x0B04+0x30*numContents+0xA00)-0x300) {
-		certSlice = tmdData.Bytes()[0x0B04+0x30*numContents : 0x0B04+0x30*numContents+0xA00-0x300]
+	if len(tmdData) == int((0x0B04+0x30*numContents+0xA00)-0x300) {
+		certSlice = tmdData[0x0B04+0x30*numContents : 0x0B04+0x30*numContents+0xA00-0x300]
 	} else {
-		certSlice = tmdData.Bytes()[0x0B04+0x30*numContents : 0x0B04+0x30*numContents+0xA00]
+		certSlice = tmdData[0x0B04+0x30*numContents : 0x0B04+0x30*numContents+0xA00]
 	}
 	switch id {
 	case 0:
