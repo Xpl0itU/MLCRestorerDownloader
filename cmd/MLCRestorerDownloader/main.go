@@ -38,7 +38,7 @@ func showSubmenu(titleType string) {
 	}
 	titles, err := readTitleInfoFromFile("titles.json")
 	if err != nil {
-		fmt.Println("Error:", err)
+		fmt.Println("[Error]", err)
 		return
 	}
 
@@ -97,10 +97,10 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		}
 		fmt.Printf("[Info] Downloading files for title %s on region %s for type %s\n", titleID, region, titleType)
 		if err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID), commonKey); err != nil {
-			fmt.Println("Error:", err)
+			fmt.Println("[Error]", err)
 			os.Exit(1)
 		}
 		fmt.Printf("[Info] Download files for title %s on region %s for type %s done\n", titleID, region, titleType)
 	}
-	fmt.Println("All done!")
+	fmt.Println("[Info] All done!")
 }
