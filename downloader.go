@@ -106,6 +106,7 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 		return err
 	}
 	defer certFile.Close()
+	fmt.Printf("[Info] Certificate saved to ./%v \n", certPath)
 
 	for i := 0; i < int(contentCount); i++ {
 		offset := 2820 + (48 * i)
