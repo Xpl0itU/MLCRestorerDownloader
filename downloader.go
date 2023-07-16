@@ -34,16 +34,14 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 		return err
 	}
 
-	err = os.MkdirAll(outputDir, os.ModePerm)
-	if err != nil {
+	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
 		return err
 	}
 
 	client := grab.NewClient()
 	downloadURL := fmt.Sprintf("%s/%s", baseURL, "tmd")
 	tmdPath := filepath.Join(outputDir, "title.tmd")
-	err = downloadFile(client, downloadURL, tmdPath)
-	if err != nil {
+	if err := downloadFile(client, downloadURL, tmdPath); err != nil {
 		return err
 	}
 
@@ -53,15 +51,13 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 	}
 
 	var titleVersion uint16
-	err = binary.Read(bytes.NewReader(tmdData[476:478]), binary.BigEndian, &titleVersion)
-	if err != nil {
+	if err := binary.Read(bytes.NewReader(tmdData[476:478]), binary.BigEndian, &titleVersion); err != nil {
 		return err
 	}
 
 	tikPath := filepath.Join(outputDir, "title.tik")
 	downloadURL = fmt.Sprintf("%s/%s", baseURL, "cetk")
-	err = downloadFile(client, downloadURL, tikPath)
-	if err != nil {
+	if err := downloadFile(client, downloadURL, tikPath); err != nil {
 		return err
 	}
 	tikData, err := os.ReadFile(tikPath)
@@ -71,8 +67,7 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 	encryptedTitleKey := tikData[0x1BF : 0x1BF+0x10]
 
 	var contentCount uint16
-	err = binary.Read(bytes.NewReader(tmdData[478:480]), binary.BigEndian, &contentCount)
-	if err != nil {
+	if err := binary.Read(bytes.NewReader(tmdData[478:480]), binary.BigEndian, &contentCount); err != nil {
 		return err
 	}
 
@@ -101,8 +96,7 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 	if err != nil {
 		return err
 	}
-	err = binary.Write(certFile, binary.BigEndian, cert.Bytes())
-	if err != nil {
+	if err := binary.Write(certFile, binary.BigEndian, cert.Bytes()); err != nil {
 		return err
 	}
 	defer certFile.Close()
@@ -111,31 +105,27 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 	for i := 0; i < int(contentCount); i++ {
 		offset := 2820 + (48 * i)
 		var id uint32
-		err = binary.Read(bytes.NewReader(tmdData[offset:offset+4]), binary.BigEndian, &id)
-		if err != nil {
+		if err := binary.Read(bytes.NewReader(tmdData[offset:offset+4]), binary.BigEndian, &id); err != nil {
 			return err
 		}
 
 		appPath := filepath.Join(outputDir, fmt.Sprintf("%08X.app", id))
 		downloadURL = fmt.Sprintf("%s/%08X", baseURL, id)
-		err = downloadFile(client, downloadURL, appPath)
-		if err != nil {
+		if err := downloadFile(client, downloadURL, appPath); err != nil {
 			return err
 		}
 
 		if tmdData[offset+7]&0x2 == 2 {
 			h3Path := filepath.Join(outputDir, fmt.Sprintf("%08X.h3", id))
 			downloadURL = fmt.Sprintf("%s/%08X.h3", baseURL, id)
-			err = downloadFile(client, downloadURL, h3Path)
-			if err != nil {
+			if err := downloadFile(client, downloadURL, h3Path); err != nil {
 				return err
 			}
 			var content contentInfo
 			content.Hash = tmdData[offset+16 : offset+0x14]
 			content.ID = fmt.Sprintf("%08X", id)
 			binary.Read(bytes.NewReader(tmdData[offset+8:offset+15]), binary.BigEndian, &content.Size)
-			err = checkContentHashes(outputDirectory, commonKey, encryptedTitleKey, titleKeyBytes, content)
-			if err != nil {
+			if err := checkContentHashes(outputDirectory, commonKey, encryptedTitleKey, titleKeyBytes, content); err != nil {
 				return err
 			}
 		}

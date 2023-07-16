@@ -39,8 +39,7 @@ func getDefaultCert(client *grab.Client) ([]byte, error) {
 		return nil, err
 	}
 
-	err = os.Remove("cetk")
-	if err != nil {
+	if err := os.Remove("cetk"); err != nil {
 		return nil, err
 	}
 

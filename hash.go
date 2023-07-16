@@ -23,13 +23,13 @@ func checkContentHashes(path string, commonKey []byte, encryptedTitleKey []byte,
 	if err != nil {
 		return fmt.Errorf("failed to read H3 hash tree file: %w", err)
 	}
-	encryptedFile, err := os.OpenFile(fmt.Sprintf("%s/%s.app", path, content.ID), os.O_RDONLY, 0)
+	encryptedFile, err := os.Open(fmt.Sprintf("%s/%s.app", path, content.ID))
 	if err != nil {
 		return fmt.Errorf("failed to open encrypted file: %w", err)
 	}
 
 	h3Hash := sha1.Sum(h3Data)
-	if !equalSlices(h3Hash[:8], content.Hash[:8]) {
+	if !reflect.DeepEqual(h3Hash[:8], content.Hash[:8]) {
 		return fmt.Errorf("h3 Hash mismatch")
 	}
 
@@ -94,16 +94,4 @@ type contentInfo struct {
 	ID   string
 	Size int64
 	Hash []byte
-}
-
-func equalSlices(slice1, slice2 []byte) bool {
-	if len(slice1) != len(slice2) {
-		return false
-	}
-	for i := range slice1 {
-		if slice1[i] != slice2[i] {
-			return false
-		}
-	}
-	return true
 }
