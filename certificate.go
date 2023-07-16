@@ -30,11 +30,10 @@ func getDefaultCert(client *grab.Client) ([]byte, error) {
 	if len(cetkData) >= 0x350+0x300 {
 		return cetkData[0x350 : 0x350+0x300], nil
 	}
-	err := downloadFile(client, "http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/000500101000400a/cetk", "cetk")
-	if err != nil {
+	if err := downloadFile(client, "http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/000500101000400a/cetk", "cetk"); err != nil {
 		return nil, err
 	}
-	cetkData, err = os.ReadFile("cetk")
+	cetkData, err := os.ReadFile("cetk")
 	if err != nil {
 		return nil, err
 	}
