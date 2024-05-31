@@ -1,47 +1,172 @@
 package mlcrestorerdownloader
 
 import (
-	"bytes"
-	"encoding/binary"
-	"encoding/hex"
+	"context"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/cavaliergopher/grab/v3"
+	ctxio "github.com/jbenet/go-context/io"
+	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 )
 
-func downloadFile(client *grab.Client, url string, outputPath string) error {
-	req, err := grab.NewRequest(outputPath, url)
-	if err != nil {
+const (
+	maxRetries             = 5
+	retryDelay             = 5 * time.Second
+	maxConcurrentDownloads = 4
+)
+
+var (
+	errCancel = fmt.Errorf("cancelled download")
+)
+
+type ProgressReporter interface {
+	SetGameTitle(title string)
+	UpdateDownloadProgress(downloaded int64, filename string)
+	UpdateDecryptionProgress(progress float64)
+	PrintProgress()
+	SetDownloadSize(size int64)
+	ResetTotals()
+	MarkFileAsDone(filename string)
+	SetTotalDownloadedForFile(filename string, downloaded int64)
+	SetStartTime(startTime time.Time)
+}
+
+func downloadFileWithSemaphore(ctx context.Context, progressReporter ProgressReporter, client *http.Client, downloadURL, dstPath string, doRetries bool, sem *semaphore.Weighted) error {
+	if err := sem.Acquire(ctx, 1); err != nil {
 		return err
 	}
-	resp := client.Do(req)
-	if err := resp.Err(); err != nil {
-		return err
+	defer sem.Release(1)
+
+	basePath := filepath.Base(dstPath)
+
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req := &http.Request{}
+		parsedURL, err := url.Parse(downloadURL)
+		if err != nil {
+			return err
+		}
+		req.URL = parsedURL
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if doRetries && attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			if doRetries && attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return fmt.Errorf("download error after %d attempts, status code: %d", attempt, resp.StatusCode)
+		}
+
+		file, err := os.Create(dstPath)
+		if err != nil {
+			resp.Body.Close()
+			return err
+		}
+
+		progressReporter.SetTotalDownloadedForFile(basePath, 0)
+		writerProgress := newWriterProgress(file, progressReporter, basePath)
+		writerProgressWithContext := ctxio.NewWriter(ctx, writerProgress)
+		bodyReaderWithContext := ctxio.NewReader(ctx, resp.Body)
+		_, err = io.Copy(writerProgressWithContext, bodyReaderWithContext)
+		if err != nil {
+			file.Close()
+			resp.Body.Close()
+			writerProgress.Close()
+			if doRetries && attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return err
+		}
+		file.Close()
+		resp.Body.Close()
+		writerProgress.Close()
+		progressReporter.MarkFileAsDone(basePath)
+		break
 	}
 
-	fmt.Printf("[Info] Download saved to ./%v \n", resp.Filename)
 	return nil
 }
 
-func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) error {
+func downloadFile(progressReporter ProgressReporter, client *http.Client, downloadURL, dstPath string, doRetries bool) error {
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		req, err := http.NewRequest("GET", downloadURL, nil)
+		if err != nil {
+			return err
+		}
+
+		req.Header.Set("User-Agent", "WiiUDownloader")
+
+		resp, err := client.Do(req)
+		if err != nil {
+			if doRetries && attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return err
+		}
+
+		if resp.StatusCode != http.StatusOK {
+			resp.Body.Close()
+			if doRetries && attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return fmt.Errorf("download error after %d attempts, status code: %d", attempt, resp.StatusCode)
+		}
+
+		file, err := os.Create(dstPath)
+		if err != nil {
+			resp.Body.Close()
+			return err
+		}
+
+		writerProgress := newWriterProgress(file, progressReporter, filepath.Base(dstPath))
+		_, err = io.Copy(writerProgress, resp.Body)
+		if err != nil {
+			file.Close()
+			resp.Body.Close()
+			if doRetries && attempt < maxRetries {
+				time.Sleep(retryDelay)
+				continue
+			}
+			return err
+		}
+		file.Close()
+		resp.Body.Close()
+		break
+	}
+
+	return nil
+}
+
+func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressReporter, client *http.Client, commonKey []byte) error {
+	progressReporter.ResetTotals()
+
 	outputDir := strings.TrimRight(outputDirectory, "/\\")
 	baseURL := fmt.Sprintf("http://ccs.cdn.c.shop.nintendowifi.net/ccs/download/%s", titleID)
-	titleKeyBytes, err := hex.DecodeString(titleID)
-	if err != nil {
-		return err
-	}
 
 	if err := os.MkdirAll(outputDir, os.ModePerm); err != nil {
 		return err
 	}
 
-	client := grab.NewClient()
-	downloadURL := fmt.Sprintf("%s/%s", baseURL, "tmd")
 	tmdPath := filepath.Join(outputDir, "title.tmd")
-	if err := downloadFile(client, downloadURL, tmdPath); err != nil {
+	if err := downloadFile(progressReporter, client, fmt.Sprintf("%s/%s", baseURL, "tmd"), tmdPath, true); err != nil {
 		return err
 	}
 
@@ -50,85 +175,56 @@ func DownloadTitle(titleID string, outputDirectory string, commonKey []byte) err
 		return err
 	}
 
-	var titleVersion uint16
-	if err := binary.Read(bytes.NewReader(tmdData[476:478]), binary.BigEndian, &titleVersion); err != nil {
+	tmd, err := ParseTMD(tmdData)
+	if err != nil {
 		return err
 	}
 
 	tikPath := filepath.Join(outputDir, "title.tik")
-	downloadURL = fmt.Sprintf("%s/%s", baseURL, "cetk")
-	if err := downloadFile(client, downloadURL, tikPath); err != nil {
-		return err
-	}
-	tikData, err := os.ReadFile(tikPath)
-	if err != nil {
-		return err
-	}
-	encryptedTitleKey := tikData[0x1BF : 0x1BF+0x10]
-
-	var contentCount uint16
-	if err := binary.Read(bytes.NewReader(tmdData[478:480]), binary.BigEndian, &contentCount); err != nil {
+	if err := downloadFile(progressReporter, client, fmt.Sprintf("%s/%s", baseURL, "cetk"), tikPath, false); err != nil {
 		return err
 	}
 
-	cert := bytes.Buffer{}
+	var titleSize uint64
 
-	cert0, err := getCert(tmdData, 0, contentCount)
-	if err != nil {
+	for i := 0; i < int(tmd.ContentCount); i++ {
+		titleSize += tmd.Contents[i].Size
+	}
+
+	progressReporter.SetDownloadSize(int64(titleSize))
+
+	if err := GenerateCert(tmd, filepath.Join(outputDir, "title.cert"), progressReporter, client); err != nil {
 		return err
 	}
-	cert.Write(cert0)
 
-	cert1, err := getCert(tmdData, 1, contentCount)
-	if err != nil {
-		return err
-	}
-	cert.Write(cert1)
+	g, ctx := errgroup.WithContext(context.Background())
+	g.SetLimit(maxConcurrentDownloads)
+	sem := semaphore.NewWeighted(maxConcurrentDownloads)
+	progressReporter.SetStartTime(time.Now())
 
-	defaultCert, err := getDefaultCert(client)
-	if err != nil {
-		return err
-	}
-	cert.Write(defaultCert)
-
-	certPath := filepath.Join(outputDir, "title.cert")
-	certFile, err := os.Create(certPath)
-	if err != nil {
-		return err
-	}
-	if err := binary.Write(certFile, binary.BigEndian, cert.Bytes()); err != nil {
-		return err
-	}
-	defer certFile.Close()
-	fmt.Printf("[Info] Certificate saved to ./%v \n", certPath)
-
-	for i := 0; i < int(contentCount); i++ {
-		offset := 2820 + (48 * i)
-		var id uint32
-		if err := binary.Read(bytes.NewReader(tmdData[offset:offset+4]), binary.BigEndian, &id); err != nil {
-			return err
-		}
-
-		appPath := filepath.Join(outputDir, fmt.Sprintf("%08X.app", id))
-		downloadURL = fmt.Sprintf("%s/%08X", baseURL, id)
-		if err := downloadFile(client, downloadURL, appPath); err != nil {
-			return err
-		}
-
-		if tmdData[offset+7]&0x2 == 2 {
-			h3Path := filepath.Join(outputDir, fmt.Sprintf("%08X.h3", id))
-			downloadURL = fmt.Sprintf("%s/%08X.h3", baseURL, id)
-			if err := downloadFile(client, downloadURL, h3Path); err != nil {
+	for i := 0; i < int(tmd.ContentCount); i++ {
+		i := i
+		g.Go(func() error {
+			filePath := filepath.Join(outputDir, fmt.Sprintf("%08X.app", tmd.Contents[i].ID))
+			if err := downloadFileWithSemaphore(ctx, progressReporter, client, fmt.Sprintf("%s/%08X", baseURL, tmd.Contents[i].ID), filePath, true, sem); err != nil {
 				return err
 			}
-			var content contentInfo
-			content.Hash = tmdData[offset+16 : offset+0x14]
-			content.ID = fmt.Sprintf("%08X", id)
-			binary.Read(bytes.NewReader(tmdData[offset+8:offset+15]), binary.BigEndian, &content.Size)
-			if err := checkContentHashes(outputDirectory, commonKey, encryptedTitleKey, titleKeyBytes, content); err != nil {
-				return err
+
+			if tmd.Contents[i].Type&0x2 == 2 { // has a hash
+				filePath = filepath.Join(outputDir, fmt.Sprintf("%08X.h3", tmd.Contents[i].ID))
+				if err := downloadFileWithSemaphore(ctx, progressReporter, client, fmt.Sprintf("%s/%08X.h3", baseURL, tmd.Contents[i].ID), filePath, true, sem); err != nil {
+					return err
+				}
 			}
+			return nil
+		})
+	}
+
+	if err := g.Wait(); err != nil {
+		if err == errCancel {
+			return nil
 		}
+		return err
 	}
 
 	return nil
