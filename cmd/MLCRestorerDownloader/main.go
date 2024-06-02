@@ -3,7 +3,10 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net"
+	"net/http"
 	"os"
+	"time"
 
 	downloader "github.com/Xpl0itU/MLCRestorerDownloader"
 )
@@ -94,17 +97,35 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		return
 	}
 
+	client := &http.Client{
+		Transport: &http.Transport{
+			Dial: (&net.Dialer{
+				Timeout:   30 * time.Second,
+				KeepAlive: 30 * time.Second,
+			}).Dial,
+			MaxIdleConns:          100,
+			MaxIdleConnsPerHost:   100,
+			MaxConnsPerHost:       100,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ResponseHeaderTimeout: 10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+
+	progressReporter := NewProgressReporterCLI()
+
 	for _, titleID := range allTitles {
 		if titleID == "dummy" {
 			continue
 		}
-		fmt.Printf("[Info] Downloading files for title %s on region %s for type %s\n", titleID, region, titleType)
-		if err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID), commonKey); err != nil {
+		fmt.Printf("\n[Info] Downloading files for title %s on region %s for type %s\n\n", titleID, region, titleType)
+		if err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID), progressReporter, client, commonKey); err != nil {
 			fmt.Println("[Error]", err)
 			failedTitles = append(failedTitles, titleID)
 			continue
 		}
-		fmt.Printf("[Info] Download files for title %s on region %s for type %s done\n", titleID, region, titleType)
+		fmt.Printf("\n[Info] Download files for title %s on region %s for type %s done\n\n", titleID, region, titleType)
 	}
 
 	if len(failedTitles) == 0 {
@@ -127,5 +148,4 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 			os.Exit(1)
 		}
 	}
-
 }
