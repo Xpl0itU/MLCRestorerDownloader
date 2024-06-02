@@ -13,7 +13,7 @@ type TitleMap struct {
 
 func readTitleInfoFromFile(filename string) (TitleMap, error) {
 	titles := TitleMap{}
-	jsonData, err := os.ReadFile("titles.json")
+	jsonData, err := os.ReadFile(filename)
 	if err != nil {
 		return titles, fmt.Errorf("error reading file: %w", err)
 	}
