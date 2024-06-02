@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"net"
 	"net/http"
@@ -88,6 +89,8 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 
 	allTitles := append(selectedRegionTitles, allRegionTitles...)
 
+	var failedTitles []string
+
 	commonKey, err := getCommonKey()
 	if err != nil {
 		fmt.Println("[Error]", err)
@@ -119,9 +122,30 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		fmt.Printf("\n[Info] Downloading files for title %s on region %s for type %s\n\n", titleID, region, titleType)
 		if err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID), progressReporter, client, commonKey); err != nil {
 			fmt.Println("[Error]", err)
-			os.Exit(1)
+			failedTitles = append(failedTitles, titleID)
+			continue
 		}
 		fmt.Printf("\n[Info] Download files for title %s on region %s for type %s done\n\n", titleID, region, titleType)
 	}
-	fmt.Println("\n[Info] All done!")
+
+	if len(failedTitles) == 0 {
+		fmt.Println("[Info] All done!")
+		fmt.Println("Press Enter to exit...")
+		bufio.NewReader(os.Stdin).ReadBytes('\n')
+		os.Exit(1)
+	} else {
+		fmt.Println("[Error] Some titles were not able to be downloaded.  Would you like to retry?")
+		fmt.Println("1. Yes, retry ")
+		fmt.Println("2. No, not right now")
+		fmt.Print("Select an option: ")
+		var inputKey string
+		fmt.Scanln(&inputKey)
+
+		switch inputKey {
+		case "1":
+			downloadTitles(region, titles, titleType)
+		default:
+			os.Exit(1)
+		}
+	}
 }
