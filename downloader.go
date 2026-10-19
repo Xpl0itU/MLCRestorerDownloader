@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	ctxio "github.com/jbenet/go-context/io"
@@ -24,6 +25,7 @@ const (
 
 var (
 	errCancel = fmt.Errorf("cancelled download")
+	certMutex sync.Mutex
 )
 
 type ProgressReporter interface {
@@ -181,7 +183,7 @@ func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressRep
 	}
 
 	tikPath := filepath.Join(outputDir, "title.tik")
-	if err := downloadFile(progressReporter, client, fmt.Sprintf("%s/%s", baseURL, "cetk"), tikPath, false); err != nil {
+	if err := downloadFile(progressReporter, client, fmt.Sprintf("%s/%s", baseURL, "cetk"), tikPath, true); err != nil {
 		return err
 	}
 
@@ -193,8 +195,11 @@ func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressRep
 
 	progressReporter.SetDownloadSize(int64(titleSize))
 
-	if err := GenerateCert(tmd, filepath.Join(outputDir, "title.cert"), progressReporter, client); err != nil {
-		return err
+	certMutex.Lock()
+	certErr := GenerateCert(tmd, filepath.Join(outputDir, "title.cert"), progressReporter, client)
+	certMutex.Unlock()
+	if certErr != nil {
+		return certErr
 	}
 
 	g, ctx := errgroup.WithContext(context.Background())
@@ -210,7 +215,7 @@ func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressRep
 				return err
 			}
 
-			if tmd.Contents[i].Type&0x2 == 2 { // has a hash
+			if tmd.Contents[i].Type&0x2 == 2 {
 				filePath = filepath.Join(outputDir, fmt.Sprintf("%08X.h3", tmd.Contents[i].ID))
 				if err := downloadFileWithSemaphore(ctx, progressReporter, client, fmt.Sprintf("%s/%08X.h3", baseURL, tmd.Contents[i].ID), filePath, true, sem); err != nil {
 					return err
@@ -224,6 +229,10 @@ func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressRep
 		if err == errCancel {
 			return nil
 		}
+		return err
+	}
+
+	if err := VerifyTitle(titleID, outputDir, commonKey, progressReporter); err != nil {
 		return err
 	}
 
