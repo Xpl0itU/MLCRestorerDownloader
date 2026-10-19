@@ -262,6 +262,16 @@ func (tr *TitleProgressReporter) UpdateDecryptionProgress(progress float64) {
 	tr.parent.progressMutex.Unlock()
 }
 
+func (tr *TitleProgressReporter) Cancelled() bool {
+	return false
+}
+
+func (tr *TitleProgressReporter) SetCancelled() {}
+
+func (tr *TitleProgressReporter) Done() <-chan struct{} {
+	return nil
+}
+
 func (tr *TitleProgressReporter) SetDownloadSize(size int64) {
 	tr.mu.Lock()
 	diff := size - tr.allocatedSize
