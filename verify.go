@@ -214,7 +214,7 @@ func verifySingleContent(workDir string, c Content, titleBlock cipher.Block, onP
 		for {
 			nRead, readErr := io.ReadFull(fApp, buf)
 			if readErr != nil && !errors.Is(readErr, io.EOF) && !errors.Is(readErr, io.ErrUnexpectedEOF) {
-				return readErr // Correction : renvoyer readErr au lieu de err
+				return readErr
 			}
 			if nRead == 0 {
 				break
