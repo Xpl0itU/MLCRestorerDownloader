@@ -120,12 +120,6 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		verifiedCnt  int32
 	)
 
-	commonKey, err := getCommonKey()
-	if err != nil {
-		fmt.Println("[Error]", err)
-		return
-	}
-
 	client := &http.Client{
 		Transport: &http.Transport{
 			Dial: (&net.Dialer{
@@ -159,7 +153,7 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 			progressReporter.LogLine("[Info] [%d/%d] Downloading title %s (%s %s)", idx+1, totalTitles, titleID, region, titleType)
 
 			targetDir := fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID)
-			err := downloader.DownloadTitle(titleID, targetDir, titleReporter, client, commonKey)
+			err := downloader.DownloadTitle(titleID, targetDir, titleReporter, client)
 			if err != nil {
 				titleReporter.Finish(false)
 				progressReporter.LogLine("[Error] [%d/%d] Title %s failed: %v", idx+1, totalTitles, titleID, err)
@@ -183,7 +177,7 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 	var finalMissingOrCorrupt []string
 	for idx, titleID := range allTitles {
 		targetDir := fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID)
-		if err := downloader.VerifyTitle(titleID, targetDir, commonKey, nil); err != nil {
+		if err := downloader.VerifyTitle(titleID, targetDir, nil); err != nil {
 			fmt.Printf("[Error] [%d/%d] Final check FAILED for %s: %v\n", idx+1, totalTitles, titleID, err)
 			finalMissingOrCorrupt = append(finalMissingOrCorrupt, titleID)
 		}
