@@ -6,10 +6,16 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	downloader "github.com/Xpl0itU/MLCRestorerDownloader"
+	"golang.org/x/sync/errgroup"
 )
+
+const maxConcurrentTitles = 3
 
 func main() {
 	fmt.Println("Menu:")
@@ -83,13 +89,36 @@ func showSubmenu(titleType string) {
 	}
 }
 
+func collectUniqueTitles(titles map[string][]string, region string) []string {
+	rawList := append(titles[region], titles["All"]...)
+	seen := make(map[string]struct{}, len(rawList))
+	valid := make([]string, 0, len(rawList))
+
+	for _, tid := range rawList {
+		if tid == "dummy" {
+			continue
+		}
+		norm := strings.ToLower(strings.ReplaceAll(strings.TrimSpace(tid), "-", ""))
+		if norm == "" {
+			continue
+		}
+		if _, exists := seen[norm]; !exists {
+			seen[norm] = struct{}{}
+			valid = append(valid, tid)
+		}
+	}
+	return valid
+}
+
 func downloadTitles(region string, titles map[string][]string, titleType string) {
-	selectedRegionTitles := titles[region]
-	allRegionTitles := titles["All"]
+	allTitles := collectUniqueTitles(titles, region)
+	totalTitles := len(allTitles)
 
-	allTitles := append(selectedRegionTitles, allRegionTitles...)
-
-	var failedTitles []string
+	var (
+		failedMu     sync.Mutex
+		failedTitles []string
+		verifiedCnt  int32
+	)
 
 	commonKey, err := getCommonKey()
 	if err != nil {
@@ -114,27 +143,63 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 	}
 
 	progressReporter := NewProgressReporterCLI()
+	progressReporter.SetBatchTotals(totalTitles)
 
-	for _, titleID := range allTitles {
-		if titleID == "dummy" {
-			continue
-		}
-		fmt.Printf("\n[Info] Downloading files for title %s on region %s for type %s\n\n", titleID, region, titleType)
-		if err := downloader.DownloadTitle(titleID, fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID), progressReporter, client, commonKey); err != nil {
-			fmt.Println("[Error]", err)
-			failedTitles = append(failedTitles, titleID)
-			continue
-		}
-		fmt.Printf("\n[Info] Download files for title %s on region %s for type %s done\n\n", titleID, region, titleType)
+	fmt.Printf("\n[Info] Starting concurrent download of %d %s titles for region %s (%d titles in parallel)...\n\n",
+		totalTitles, titleType, region, maxConcurrentTitles)
+
+	var g errgroup.Group
+	g.SetLimit(maxConcurrentTitles)
+
+	for idx, titleID := range allTitles {
+		idx := idx
+		titleID := titleID
+		g.Go(func() error {
+			titleReporter := progressReporter.ForTitle(titleID)
+			progressReporter.LogLine("[Info] [%d/%d] Downloading title %s (%s %s)", idx+1, totalTitles, titleID, region, titleType)
+
+			targetDir := fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID)
+			err := downloader.DownloadTitle(titleID, targetDir, titleReporter, client, commonKey)
+			if err != nil {
+				titleReporter.Finish(false)
+				progressReporter.LogLine("[Error] [%d/%d] Title %s failed: %v", idx+1, totalTitles, titleID, err)
+				failedMu.Lock()
+				failedTitles = append(failedTitles, titleID)
+				failedMu.Unlock()
+				return nil
+			}
+
+			titleReporter.Finish(true)
+			doneNow := atomic.AddInt32(&verifiedCnt, 1)
+			progressReporter.LogLine("[Info] [%d/%d] Title %s downloaded and verified OK", doneNow, totalTitles, titleID)
+			return nil
+		})
 	}
 
-	if len(failedTitles) == 0 {
-		fmt.Println("[Info] All done!")
+	_ = g.Wait()
+	progressReporter.ClearLine()
+
+	fmt.Printf("\n[Info] Running final completeness and integrity check on all %d %s (%s) titles...\n", totalTitles, titleType, region)
+	var finalMissingOrCorrupt []string
+	for idx, titleID := range allTitles {
+		targetDir := fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID)
+		if err := downloader.VerifyTitle(titleID, targetDir, commonKey, nil); err != nil {
+			fmt.Printf("[Error] [%d/%d] Final check FAILED for %s: %v\n", idx+1, totalTitles, titleID, err)
+			finalMissingOrCorrupt = append(finalMissingOrCorrupt, titleID)
+		}
+	}
+
+	fmt.Printf("\n[Info] Final Summary for %s (%s): %d/%d titles present and cryptographically verified OK\n",
+		titleType, region, totalTitles-len(finalMissingOrCorrupt), totalTitles)
+
+	if len(finalMissingOrCorrupt) == 0 && len(failedTitles) == 0 {
+		fmt.Println("[Info] All done! Every single title is complete and verified.")
 		fmt.Println("Press Enter to exit...")
 		bufio.NewReader(os.Stdin).ReadBytes('\n')
-		os.Exit(1)
+		os.Exit(0)
 	} else {
-		fmt.Println("[Error] Some titles were not able to be downloaded.  Would you like to retry?")
+		fmt.Printf("[Error] Titles failing verification: %v\n", finalMissingOrCorrupt)
+		fmt.Println("[Error] Some titles were not able to be downloaded or verified. Would you like to retry?")
 		fmt.Println("1. Yes, retry ")
 		fmt.Println("2. No, not right now")
 		fmt.Print("Select an option: ")
