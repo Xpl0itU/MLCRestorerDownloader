@@ -9,7 +9,7 @@ import (
 
 type ProgressReporter = wiiudownloader.ProgressReporter
 
-func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressReporter, client *http.Client, commonKey []byte) error {
+func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressReporter, client *http.Client) error {
 	outputDir := strings.TrimRight(outputDirectory, "/\\")
 
 	if client == nil {
@@ -28,6 +28,6 @@ func DownloadTitle(titleID, outputDirectory string, progressReporter ProgressRep
 	)
 }
 
-func VerifyTitle(titleID, outputDirectory string, commonKey []byte, progressReporter ProgressReporter) error {
-	return DownloadTitle(titleID, outputDirectory, progressReporter, http.DefaultClient, commonKey)
+func VerifyTitle(titleID, outputDirectory string, progressReporter ProgressReporter) error {
+	return DownloadTitle(titleID, outputDirectory, progressReporter, http.DefaultClient)
 }
