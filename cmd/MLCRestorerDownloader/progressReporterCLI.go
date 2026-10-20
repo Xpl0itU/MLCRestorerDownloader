@@ -97,6 +97,7 @@ type ProgressReporterCLI struct {
 	totalTitles     int
 	completedTitles int
 	activeTitles    int
+	exactSizeKnown  bool
 	activeReporters map[*TitleProgressReporter]struct{}
 }
 
@@ -110,10 +111,10 @@ func NewProgressReporterCLI() *ProgressReporterCLI {
 	}
 }
 
-func (pr *ProgressReporterCLI) SetBatchTotals(totalTitles int) {
+func (pr *ProgressReporterCLI) SetBatchTotals(totalTitles int, totalBytes int64) {
 	pr.progressMutex.Lock()
 	defer pr.progressMutex.Unlock()
-	pr.totalToDownload = 0
+	pr.totalToDownload = totalBytes
 	pr.totalDownloaded = 0
 	pr.progressPerFile = make(map[string]int64)
 	pr.startTime = time.Now()
@@ -121,6 +122,7 @@ func (pr *ProgressReporterCLI) SetBatchTotals(totalTitles int) {
 	pr.totalTitles = totalTitles
 	pr.completedTitles = 0
 	pr.activeTitles = 0
+	pr.exactSizeKnown = totalBytes > 0
 	pr.speedEstimator = newSpeedEstimator()
 	pr.activeReporters = make(map[*TitleProgressReporter]struct{})
 }
@@ -198,43 +200,26 @@ func (pr *ProgressReporterCLI) renderProgressLocked(force bool) {
 	var percentage float64
 	var remainingStr string = "--:--"
 
-	if pr.totalTitles > 0 {
-		var activeFraction float64
-		for rep := range pr.activeReporters {
-			rep.mu.Lock()
-			if rep.allocatedSize > 0 {
-				frac := float64(rep.countedBytes) / float64(rep.allocatedSize)
-				if frac > 1.0 {
-					frac = 1.0
-				}
-				activeFraction += frac
-			}
-			rep.mu.Unlock()
-		}
-
-		effectiveDone := float64(pr.completedTitles) + activeFraction
-		percentage = (effectiveDone / float64(pr.totalTitles)) * 100.0
+	if pr.totalToDownload > 0 {
+		percentage = (float64(pr.totalDownloaded) / float64(pr.totalToDownload)) * 100.0
 		if percentage > 100.0 {
 			percentage = 100.0
 		}
-
-		totalSizeStr := "?"
-		if percentage >= 2.0 && pr.totalDownloaded > 0 {
-			estTotal := int64(float64(pr.totalDownloaded) / (percentage / 100.0))
-			totalSizeStr = "~" + formatBytes(estTotal)
-		} else if pr.totalToDownload > 0 {
-			totalSizeStr = formatBytes(pr.totalToDownload)
+		if speedMBps > 0.01 && pr.totalToDownload > pr.totalDownloaded {
+			remBytes := float64(pr.totalToDownload - pr.totalDownloaded)
+			remSec := remBytes / (speedMBps * 1024 * 1024)
+			remainingStr = formatDuration(time.Duration(remSec * float64(time.Second)))
+		} else if pr.totalDownloaded >= pr.totalToDownload {
+			remainingStr = "00:00"
 		}
+	} else if pr.totalTitles > 0 {
+		percentage = (float64(pr.completedTitles) / float64(pr.totalTitles)) * 100.0
+	}
 
-		if effectiveDone >= 0.2 && elapsed.Seconds() > 1.0 {
-			titlesPerSec := effectiveDone / elapsed.Seconds()
-			remTitles := float64(pr.totalTitles) - effectiveDone
-			if remTitles > 0 && titlesPerSec > 0 {
-				remSec := remTitles / titlesPerSec
-				remainingStr = formatDuration(time.Duration(remSec * float64(time.Second)))
-			} else {
-				remainingStr = "00:00"
-			}
+	if pr.totalTitles > 0 {
+		totalStr := formatBytes(pr.totalToDownload)
+		if !pr.exactSizeKnown {
+			totalStr = "?"
 		}
 
 		line := fmt.Sprintf("[%d/%d done | %d active] [%s] %5.1f%% | %s / %s | %.2f MB/s | %s < %s",
@@ -244,26 +229,13 @@ func (pr *ProgressReporterCLI) renderProgressLocked(force bool) {
 			makeProgressBar(percentage, BAR_WIDTH),
 			percentage,
 			formatBytes(pr.totalDownloaded),
-			totalSizeStr,
+			totalStr,
 			speedMBps,
 			formatDuration(elapsed),
 			remainingStr,
 		)
 		pr.writeStatusLocked(line, force)
-
 	} else {
-		if pr.totalToDownload > 0 {
-			percentage = float64(pr.totalDownloaded) / float64(pr.totalToDownload) * 100.0
-			if percentage > 100.0 {
-				percentage = 100.0
-			}
-			if speedMBps > 0.01 && pr.totalToDownload > pr.totalDownloaded {
-				remBytes := float64(pr.totalToDownload - pr.totalDownloaded)
-				remSec := remBytes / (speedMBps * 1024 * 1024)
-				remainingStr = formatDuration(time.Duration(remSec * float64(time.Second)))
-			}
-		}
-
 		line := fmt.Sprintf("[%s] %5.1f%% | %s / %s | %.2f MB/s | %s < %s",
 			makeProgressBar(percentage, BAR_WIDTH),
 			percentage,
@@ -287,6 +259,7 @@ func (pr *ProgressReporterCLI) UpdateDownloadProgress(downloaded int64, filename
 	pr.totalDownloaded += downloaded
 	pr.progressPerFile[filename] += downloaded
 	pr.speedAverager.AddSpeed(downloaded)
+	pr.renderProgressLocked(false)
 }
 
 func (pr *ProgressReporterCLI) UpdateDecryptionProgress(progress float64) {
@@ -409,7 +382,9 @@ func (tr *TitleProgressReporter) SetDownloadSize(size int64) {
 	tr.mu.Unlock()
 
 	tr.parent.progressMutex.Lock()
-	tr.parent.totalToDownload += diff
+	if !tr.parent.exactSizeKnown {
+		tr.parent.totalToDownload += diff
+	}
 	tr.parent.renderProgressLocked(false)
 	tr.parent.progressMutex.Unlock()
 }
@@ -428,9 +403,11 @@ func (tr *TitleProgressReporter) ResetTotals() {
 	if tr.parent.totalDownloaded < 0 {
 		tr.parent.totalDownloaded = 0
 	}
-	tr.parent.totalToDownload -= prevAlloc
-	if tr.parent.totalToDownload < 0 {
-		tr.parent.totalToDownload = 0
+	if !tr.parent.exactSizeKnown {
+		tr.parent.totalToDownload -= prevAlloc
+		if tr.parent.totalToDownload < 0 {
+			tr.parent.totalToDownload = 0
+		}
 	}
 	tr.parent.progressMutex.Unlock()
 }
@@ -455,6 +432,7 @@ func (tr *TitleProgressReporter) SetTotalDownloadedForFile(filename string, down
 		if tr.parent.totalDownloaded < 0 {
 			tr.parent.totalDownloaded = 0
 		}
+		tr.parent.renderProgressLocked(false)
 		tr.parent.progressMutex.Unlock()
 	}
 }
