@@ -145,18 +145,17 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 	var g errgroup.Group
 	g.SetLimit(maxConcurrentTitles)
 
-	for idx, titleID := range allTitles {
-		idx := idx
+	for _, titleID := range allTitles {
 		titleID := titleID
 		g.Go(func() error {
 			titleReporter := progressReporter.ForTitle(titleID)
-			progressReporter.LogLine("[Info] [%d/%d] Downloading title %s (%s %s)", idx+1, totalTitles, titleID, region, titleType)
+			progressReporter.LogLine("[Info] Downloading title %s (%s %s)", titleID, region, titleType)
 
 			targetDir := fmt.Sprintf("output/%s/%s/%s", titleType, region, titleID)
 			err := downloader.DownloadTitle(titleID, targetDir, titleReporter, client)
 			if err != nil {
 				titleReporter.Finish(false)
-				progressReporter.LogLine("[Error] [%d/%d] Title %s failed: %v", idx+1, totalTitles, titleID, err)
+				progressReporter.LogLine("[Error] Title %s failed: %v", titleID, err)
 				failedMu.Lock()
 				failedTitles = append(failedTitles, titleID)
 				failedMu.Unlock()
@@ -183,7 +182,7 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		}
 	}
 
-	fmt.Printf("\n[Info] Final Summary for %s (%s): %d/%d titles present and cryptographically verified OK\n",
+	fmt.Printf("\n[Info] Final Summary for %s (%s): %d/%d titles present (+ integrity checks passed)\n",
 		titleType, region, totalTitles-len(finalMissingOrCorrupt), totalTitles)
 
 	if len(finalMissingOrCorrupt) == 0 && len(failedTitles) == 0 {
