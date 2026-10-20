@@ -94,7 +94,6 @@ type ProgressReporterCLI struct {
 	speedEstimator  *SpeedEstimator
 	startTime       time.Time
 	lastPrintTime   time.Time
-	lastLineLen     int
 	totalTitles     int
 	completedTitles int
 	activeTitles    int
@@ -119,7 +118,6 @@ func (pr *ProgressReporterCLI) SetBatchTotals(totalTitles int) {
 	pr.progressPerFile = make(map[string]int64)
 	pr.startTime = time.Now()
 	pr.lastPrintTime = time.Time{}
-	pr.lastLineLen = 0
 	pr.totalTitles = totalTitles
 	pr.completedTitles = 0
 	pr.activeTitles = 0
@@ -130,20 +128,14 @@ func (pr *ProgressReporterCLI) SetBatchTotals(totalTitles int) {
 func (pr *ProgressReporterCLI) LogLine(format string, args ...any) {
 	pr.progressMutex.Lock()
 	defer pr.progressMutex.Unlock()
-	if pr.lastLineLen > 0 {
-		fmt.Printf("\r%s\r", strings.Repeat(" ", pr.lastLineLen))
-		pr.lastLineLen = 0
-	}
+	fmt.Print("\r\033[K")
 	fmt.Printf(format+"\n", args...)
 }
 
 func (pr *ProgressReporterCLI) ClearLine() {
 	pr.progressMutex.Lock()
 	defer pr.progressMutex.Unlock()
-	if pr.lastLineLen > 0 {
-		fmt.Printf("\r%s\r", strings.Repeat(" ", pr.lastLineLen))
-		pr.lastLineLen = 0
-	}
+	fmt.Print("\r\033[K")
 }
 
 func (pr *ProgressReporterCLI) writeStatusLocked(line string, force bool) {
@@ -152,13 +144,7 @@ func (pr *ProgressReporterCLI) writeStatusLocked(line string, force bool) {
 		return
 	}
 	pr.lastPrintTime = now
-
-	pad := ""
-	if len(line) < pr.lastLineLen {
-		pad = strings.Repeat(" ", pr.lastLineLen-len(line))
-	}
-	pr.lastLineLen = len(line)
-	fmt.Printf("\r%s%s", line, pad)
+	fmt.Printf("\r\033[K%s", line)
 }
 
 func formatBytes(b int64) string {
@@ -232,6 +218,14 @@ func (pr *ProgressReporterCLI) renderProgressLocked(force bool) {
 			percentage = 100.0
 		}
 
+		totalSizeStr := "?"
+		if percentage >= 2.0 && pr.totalDownloaded > 0 {
+			estTotal := int64(float64(pr.totalDownloaded) / (percentage / 100.0))
+			totalSizeStr = "~" + formatBytes(estTotal)
+		} else if pr.totalToDownload > 0 {
+			totalSizeStr = formatBytes(pr.totalToDownload)
+		}
+
 		if effectiveDone >= 0.2 && elapsed.Seconds() > 1.0 {
 			titlesPerSec := effectiveDone / elapsed.Seconds()
 			remTitles := float64(pr.totalTitles) - effectiveDone
@@ -243,13 +237,14 @@ func (pr *ProgressReporterCLI) renderProgressLocked(force bool) {
 			}
 		}
 
-		line := fmt.Sprintf("[%d/%d done | %d active] [%s] %5.1f%% | %s | %.2f MB/s | %s < %s",
+		line := fmt.Sprintf("[%d/%d done | %d active] [%s] %5.1f%% | %s / %s | %.2f MB/s | %s < %s",
 			pr.completedTitles,
 			pr.totalTitles,
 			pr.activeTitles,
 			makeProgressBar(percentage, BAR_WIDTH),
 			percentage,
 			formatBytes(pr.totalDownloaded),
+			totalSizeStr,
 			speedMBps,
 			formatDuration(elapsed),
 			remainingStr,
@@ -269,7 +264,7 @@ func (pr *ProgressReporterCLI) renderProgressLocked(force bool) {
 			}
 		}
 
-		line := fmt.Sprintf("[%s] %5.1f%% | %s/%s | %.2f MB/s | %s < %s",
+		line := fmt.Sprintf("[%s] %5.1f%% | %s / %s | %.2f MB/s | %s < %s",
 			makeProgressBar(percentage, BAR_WIDTH),
 			percentage,
 			formatBytes(pr.totalDownloaded),
