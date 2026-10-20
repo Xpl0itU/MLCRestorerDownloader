@@ -136,8 +136,35 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		},
 	}
 
+	fmt.Printf("\n[Info] Scanning metadata for %d %s titles to calculate exact batch size...\n", totalTitles, titleType)
+
+	var (
+		totalBatchBytes int64
+		sizeMu          sync.Mutex
+		scanGroup       errgroup.Group
+	)
+	scanGroup.SetLimit(10)
+
+	for _, tid := range allTitles {
+		tid := tid
+		scanGroup.Go(func() error {
+			sz, err := downloader.GetTitleSize(tid, client)
+			if err == nil && sz > 0 {
+				sizeMu.Lock()
+				totalBatchBytes += sz
+				sizeMu.Unlock()
+			}
+			return nil
+		})
+	}
+	_ = scanGroup.Wait()
+
 	progressReporter := NewProgressReporterCLI()
-	progressReporter.SetBatchTotals(totalTitles)
+	progressReporter.SetBatchTotals(totalTitles, totalBatchBytes)
+
+	if totalBatchBytes > 0 {
+		fmt.Printf("[Info] Total size: %s (%d bytes)\n", formatBytes(totalBatchBytes), totalBatchBytes)
+	}
 
 	fmt.Printf("\n[Info] Starting concurrent download of %d %s titles for region %s (%d titles in parallel)...\n\n",
 		totalTitles, titleType, region, maxConcurrentTitles)
@@ -182,7 +209,7 @@ func downloadTitles(region string, titles map[string][]string, titleType string)
 		}
 	}
 
-	fmt.Printf("\n[Info] Final Summary for %s (%s): %d/%d titles present (+ integrity checks passed)\n",
+	fmt.Printf("\n[Info] Final Summary for %s (%s): %d/%d titles present (integrity checks passed)\n",
 		titleType, region, totalTitles-len(finalMissingOrCorrupt), totalTitles)
 
 	if len(finalMissingOrCorrupt) == 0 && len(failedTitles) == 0 {
